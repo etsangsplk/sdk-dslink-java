@@ -10,18 +10,24 @@ import org.dsa.iot.dslink.node.value.SubscriptionValue;
 import org.dsa.iot.dslink.node.value.Value;
 import org.dsa.iot.dslink.node.value.ValueType;
 import org.dsa.iot.dslink.provider.LoopProvider;
+import org.dsa.iot.dslink.util.Objects;
 import org.dsa.iot.dslink.util.handler.Handler;
 import org.dsa.iot.historian.utils.QueryData;
 import org.dsa.iot.historian.utils.WatchUpdate;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.*;
 
 /**
  * @author Samuel Grenier
  */
 public class WatchGroup {
-    private static final int MINIMUM_AMOUNT_OF_THREADS = 3;
     private static final long DEFAULT_INTERVAL_IN_SECONDS = 5;
     private static final int DEFAULT_BUFFER_FLUSH_TIME_IN_SECONDS = 5;
     private static final LoggingType DEFAULT_LOGGING_TYPE = LoggingType.ALL_DATA;
@@ -50,8 +56,7 @@ public class WatchGroup {
         this.node = node;
         this.db = db;
 
-        int availableProcessors = Runtime.getRuntime().availableProcessors();
-        intervalScheduler = Executors.newScheduledThreadPool(Math.min(MINIMUM_AMOUNT_OF_THREADS, availableProcessors));
+        intervalScheduler = Objects.getDaemonThreadPool();
     }
 
     public void close() {
