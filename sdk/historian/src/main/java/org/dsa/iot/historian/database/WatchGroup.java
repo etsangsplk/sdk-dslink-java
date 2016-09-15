@@ -36,9 +36,11 @@ public class WatchGroup {
 
     private ScheduledFuture<?> bufferFut;
     private ScheduledFuture<?> scheduledIntervalWriter;
+    private ScheduledFuture<?> scheduledWatchTimeout;
     private LoggingType loggingType = DEFAULT_LOGGING_TYPE;
     private long interval = DEFAULT_INTERVAL_IN_SECONDS;
     private int bufferFlushTime = DEFAULT_BUFFER_FLUSH_TIME_IN_SECONDS;
+    private int watchTimeoutSeconds = 0;
 
     /**
      * @param perm Permission all actions should be set to.
@@ -52,6 +54,27 @@ public class WatchGroup {
 
         int availableProcessors = Runtime.getRuntime().availableProcessors();
         intervalScheduler = Executors.newScheduledThreadPool(Math.min(MINIMUM_AMOUNT_OF_THREADS, availableProcessors));
+
+        scheduledWatchTimeout = intervalScheduler.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                if (watchTimeoutSeconds <= 0) {
+                    return;
+                }
+
+                long currentTime = System.currentTimeMillis();
+                for (Watch watch : watches) {
+                    if (watch.getLastWatchUpdate() != null) {
+                        long lastWrittenTime = watch.getLastWrittenTime();
+                        long diff = currentTime - lastWrittenTime;
+                        if (diff >= (watchTimeoutSeconds * 1000)) {
+                            watch.unsubscribe();
+                            removeFromWatches(watch);
+                        }
+                    }
+                }
+            }
+        }, 10, 10, TimeUnit.SECONDS);
     }
 
     public void close() {
@@ -190,6 +213,10 @@ public class WatchGroup {
                 w.unsubscribe();
             }
         }
+
+        if (scheduledWatchTimeout != null) {
+            scheduledWatchTimeout.cancel(false);
+        }
     }
 
     protected void initSettings() {
@@ -229,14 +256,24 @@ public class WatchGroup {
         editBuilder.setRoConfig("lt", new Value(loggingType.getName()));
         // Interval
         editBuilder.setRoConfig("i", new Value(interval));
+        editBuilder.setRoConfig("wto", new Value(watchTimeoutSeconds));
 
         final Parameter bufferFlushTime = createBufferFlushTimeParameter();
         final Parameter loggingTypeParameter = createLoggingTypeParameter();
         final Parameter intervalParameter = createIntervalParameter();
-        Action editAction = createEditAction(bufferFlushTime, loggingTypeParameter, intervalParameter);
+        final Parameter watchTimeoutParameter = createWatchTimeoutParameter();
+        Action editAction = createEditAction(bufferFlushTime, loggingTypeParameter, intervalParameter, watchTimeoutParameter);
 
         editBuilder.setAction(editAction);
         editBuilder.build();
+    }
+
+    public Parameter createWatchTimeoutParameter() {
+        final Parameter timeoutParameter = new Parameter("WatchTimeout", ValueType.NUMBER);
+        String description = "When a watch hasn't been updated in this amount of seconds, it will be removed.";
+        timeoutParameter.setDefaultValue(new Value(0));
+        timeoutParameter.setDescription(description);
+        return timeoutParameter;
     }
 
     private void createAddWatchAction() {
@@ -260,17 +297,19 @@ public class WatchGroup {
         addWatchPathBuilder.build();
     }
 
-    private Action createEditAction(Parameter bufferFlushTime, Parameter loggingTypeParameter, Parameter intervalParameter) {
+    private Action createEditAction(Parameter bufferFlushTime, Parameter loggingTypeParameter, Parameter intervalParameter, Parameter watchTimeoutParameter) {
         EditSettingsHandler editSettingsHandler = new EditSettingsHandler();
         Action editAction = new Action(permission, editSettingsHandler);
         editSettingsHandler.setAction(editAction);
         editSettingsHandler.setBufferFlushTimeParam(bufferFlushTime);
         editSettingsHandler.setLoggingTypeParam(loggingTypeParameter);
         editSettingsHandler.setIntervalParam(intervalParameter);
+        editSettingsHandler.setWatchTimeoutParam(watchTimeoutParameter);
 
         editAction.addParameter(bufferFlushTime);
         editAction.addParameter(loggingTypeParameter);
         editAction.addParameter(intervalParameter);
+        editAction.addParameter(watchTimeoutParameter);
         return editAction;
     }
 
@@ -429,6 +468,7 @@ public class WatchGroup {
         private Parameter bufferFlushTimeParameter;
         private Parameter loggingTypeParameter;
         private Parameter intervalInSecondsParameter;
+        private Parameter watchTimeoutParameter;
 
         public void setAction(Action a) {
             this.action = a;
@@ -464,6 +504,8 @@ public class WatchGroup {
                 intervalInSecondsAsValue.set(0);
             }
 
+            Value timeoutInSeconds = event.getParameter(watchTimeoutParameter.getName(), watchTimeoutParameter.getType());
+
             node.setRoConfig("bft", bufferFlushTimeValue);
             bufferFlushTimeParameter.setDefaultValue(bufferFlushTimeValue);
             bufferFlushTime = bufferFlushTimeValue.getNumber().intValue();
@@ -476,14 +518,23 @@ public class WatchGroup {
             intervalInSecondsParameter.setDefaultValue(intervalInSecondsAsValue);
             interval = intervalInSecondsAsValue.getNumber().longValue();
 
+            node.setRoConfig("wto", timeoutInSeconds);
+            watchTimeoutParameter.setDefaultValue(timeoutInSeconds);
+            watchTimeoutSeconds = timeoutInSeconds.getNumber().intValue();
+
             List<Parameter> params = new LinkedList<>();
             params.add(bufferFlushTimeParameter);
             params.add(loggingTypeParameter);
             params.add(intervalInSecondsParameter);
+            params.add(watchTimeoutParameter);
             action.setParams(params);
 
             scheduleBufferFlush();
             scheduleWriteToBuffer();
+        }
+
+        public void setWatchTimeoutParam(Parameter watchTimeoutParameter) {
+            this.watchTimeoutParameter = watchTimeoutParameter;
         }
     }
 }

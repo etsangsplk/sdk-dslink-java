@@ -58,7 +58,7 @@ public class SerializationManager {
                     serialize();
                 }
             }
-        }, 5, 5, TimeUnit.SECONDS);
+        }, 15, 15, TimeUnit.SECONDS);
     }
 
     public synchronized void stop() {
@@ -84,7 +84,7 @@ public class SerializationManager {
                     throw new IOException("Could not delete " + tmp.getName());
                 }
             }
-            FileUtils.write(tmp, json.encodePrettily());
+            FileUtils.write(tmp, json.encode());
             if (!tmp.exists()) {
                 throw new IOException(
                         tmp.getName() + " weirdly did not exist after writing to it");
